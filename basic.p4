@@ -131,25 +131,13 @@ control MyIngress(inout headers hdr,
      *********************************************************************/
     action ipv4_forward(macAddr_t dstAddr, egressSpec_t port) {
       
-      if (hdr.ipv4.protocol != 1){
-        mark_to_drop(standard_metadata);
-      }
-      else {
       
         standard_metadata.egress_spec = port;
         hdr.ethernet.srcAddr = hdr.ethernet.dstAddr;
         hdr.ethernet.dstAddr = dstAddr;
         hdr.ipv4.ttl = hdr.ipv4.ttl - 1;
-        }
-        /*
-            Action function for forwarding IPv4 packets.
-
-            TODO: Implement the forwarding steps, for example:
-              - standard_metadata.egress_spec = port;
-              - hdr.ethernet.dstAddr = dstAddr;
-              - (optionally) set hdr.ethernet.srcAddr to the switch MAC for 'port'
-              - adjust IPv4 TTL and checksums as needed
-        */
+  
+        
     }
 
     /*********************************************************************
