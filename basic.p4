@@ -204,388 +204,166 @@ control MyIngress(
     inout standard_metadata_t standard_metadata
 ) {
 
-
-    /****************************************************************
-     * DROP
-     ****************************************************************/
+    /*
+     * Estado dinâmico do NAT (uma "tabela de conexões" em registradores).
+     *
+     * Índice = porta PÚBLICA (+65536 se UDP, para TCP e UDP terem
+     * espaços de portas separados).
+     *
+     *   nat_owner_ip[porta_publica]   = IP privado dono da porta
+     *   nat_owner_port[porta_publica] = porta privada original
+     *
+     * Serve para as duas direções: na saída reserva/consulta a porta
+     * pública; na volta descobre o host/porta privados.
+     */
+    register<bit<32>>(131072) nat_owner_ip;
+    register<bit<16>>(131072) nat_owner_port;
 
     action drop() {
-
         mark_to_drop(standard_metadata);
     }
 
-
-    /****************************************************************
-     * ENCAMINHAMENTO IPv4
-     ****************************************************************/
-
-    action ipv4_forward(
-        macAddr_t dstAddr,
-        egressSpec_t port
-    ) {
-
+    action ipv4_forward(macAddr_t dstAddr, egressSpec_t port) {
         standard_metadata.egress_spec = port;
-
-        /*
-         * Mantém o comportamento do basic.p4 original.
-         */
         hdr.ethernet.srcAddr = hdr.ethernet.dstAddr;
-
         hdr.ethernet.dstAddr = dstAddr;
-
-        /*
-         * Roteador decrementa TTL.
-         */
         hdr.ipv4.ttl = hdr.ipv4.ttl - 1;
     }
 
+    /* ---------- regras estáticas (ponto extra / port-forward) ---------- */
 
-    /****************************************************************
-     * NAT DE SAÍDA
-     *
-     * Exemplo:
-     *
-     * 10.0.0.1:5000
-     *        |
-     *        v
-     * 200.0.0.1:5000
-     *
-     * Se houver conflito, translated_port poderá ser diferente:
-     *
-     * 10.0.0.2:5000
-     *        |
-     *        v
-     * 200.0.0.1:5001
-     ****************************************************************/
-
-    action nat_out(bit<16> translated_port) {
-
-        /*
-         * Troca o IP privado pelo IP público do NAT.
-         */
+    action static_out(bit<16> public_port) {
         hdr.ipv4.srcAddr = NAT_PUBLIC_IP;
-
-
-        /*
-         * TCP
-         */
-        if (hdr.tcp.isValid()) {
-
-            hdr.tcp.srcPort = translated_port;
-        }
-
-
-        /*
-         * UDP
-         */
-        if (hdr.udp.isValid()) {
-
-            hdr.udp.srcPort = translated_port;
-        }
+        if (hdr.tcp.isValid()) { hdr.tcp.srcPort = public_port; }
+        if (hdr.udp.isValid()) { hdr.udp.srcPort = public_port; }
     }
 
-    action nat_out_preserve() {
-        // Traduz somente o IP de origem.
-        // A porta de origem permanece inalterada.
-        hdr.ipv4.srcAddr = NAT_PUBLIC_IP;
-    }
-
-    /****************************************************************
-     * NAT DE RETORNO
-     *
-     * Exemplo:
-     *
-     * H3 responde para:
-     *
-     * 200.0.0.1:5000
-     *
-     * A tabela descobre:
-     *
-     * 200.0.0.1:5000
-     *        |
-     *        v
-     * 10.0.0.1:5000
-     ****************************************************************/
-
-    action nat_in(
-        ip4Addr_t private_ip,
-        bit<16> private_port
-    ) {
-
-        /*
-         * Restaura IP privado de destino.
-         */
+    action static_in(ip4Addr_t private_ip, bit<16> private_port) {
         hdr.ipv4.dstAddr = private_ip;
-
-
-        /*
-         * Restaura porta TCP.
-         */
-        if (hdr.tcp.isValid()) {
-
-            hdr.tcp.dstPort = private_port;
-        }
-
-
-        /*
-         * Restaura porta UDP.
-         */
-        if (hdr.udp.isValid()) {
-
-            hdr.udp.dstPort = private_port;
-        }
+        if (hdr.tcp.isValid()) { hdr.tcp.dstPort = private_port; }
+        if (hdr.udp.isValid()) { hdr.udp.dstPort = private_port; }
     }
 
-    action nat_in_preserve(
-        ip4Addr_t private_ip
-    ) {
-        // Traduz somente o IP de destino.
-        // A porta de destino permanece inalterada.
-        hdr.ipv4.dstAddr = private_ip;
-    }
-
-    /****************************************************************
-     * TABELA NAT DE SAÍDA
-     *
-     * Identifica uma conexão pela combinação:
-     *
-     * IP origem
-     * IP destino
-     * porta origem
-     * porta destino
-     * protocolo
-     ****************************************************************/
-
-    table nat_out_table {
-
+    table nat_out_static {
         key = {
-
-            hdr.ipv4.srcAddr : exact;
-
-            hdr.ipv4.dstAddr : exact;
-
-            meta.srcPort : exact;
-
-            meta.dstPort : exact;
-
+            hdr.ipv4.srcAddr  : exact;
+            meta.srcPort      : exact;
             hdr.ipv4.protocol : exact;
         }
-
-
-        actions = {
-
-            nat_out;
-
-            NoAction;
-        }
-
-
-        size = 1024;
-
+        actions = { static_out; NoAction; }
+        size = 64;
         default_action = NoAction();
     }
 
-
-    /****************************************************************
-     * TABELA NAT DE RETORNO
-     *
-     * Identifica para qual host privado o pacote deve retornar.
-     ****************************************************************/
-
-    table nat_in_table {
-
+    table nat_in_static {
         key = {
-
-            hdr.ipv4.srcAddr : exact;
-
-            meta.srcPort : exact;
-
-            meta.dstPort : exact;
-
+            meta.dstPort      : exact;
             hdr.ipv4.protocol : exact;
         }
-
-
-        actions = {
-
-            nat_in;
-
-            NoAction;
-        }
-
-
-        size = 1024;
-
+        actions = { static_in; NoAction; }
+        size = 64;
         default_action = NoAction();
     }
-
-
-    /****************************************************************
-     * TABELA DE ENCAMINHAMENTO IPv4
-     ****************************************************************/
 
     table ipv4_lpm {
-
-        key = {
-
-            hdr.ipv4.dstAddr : lpm;
-        }
-
-
-        actions = {
-
-            ipv4_forward;
-
-            drop;
-
-            NoAction;
-        }
-
-
+        key = { hdr.ipv4.dstAddr : lpm; }
+        actions = { ipv4_forward; drop; NoAction; }
         size = 1024;
-
         default_action = drop();
     }
 
-
-    /****************************************************************
-     * APPLY
-     ****************************************************************/
-
     apply {
+        bit<32> base      = 0;
+        bit<32> idx       = 0;
+        bit<32> owner     = 0;
+        bit<16> owner_prv = 0;
+        bit<16> newPort   = 0;
+        bit<16> alt       = 0;
+        bool    ok        = true;
 
-
-        /************************************************************
-         * NÃO É IPv4
-         *
-         * Descarta.
-         ************************************************************/
-
-        if (!hdr.ipv4.isValid()) {
-
+        if (!hdr.ipv4.isValid() || !(hdr.tcp.isValid() || hdr.udp.isValid())) {
+            // não-IPv4, ICMP e qualquer outro protocolo: descarta
             drop();
-        }
+        } else {
 
-
-        /************************************************************
-         * TCP
-         ************************************************************/
-
-        else if (hdr.tcp.isValid()) {
-
-
-            /*
-             * Guarda as portas ORIGINAIS antes de executar o NAT.
-             */
-            meta.srcPort = hdr.tcp.srcPort;
-
-            meta.dstPort = hdr.tcp.dstPort;
-
-
-            /*
-             * Calcula tamanho TCP.
-             *
-             * Para IPv4 sem opções:
-             *
-             * TCP length = IPv4 totalLen - 20
-             *
-             * Fazemos a conta aqui porque o BMv2 não permite
-             * hdr.ipv4.totalLen - 20 diretamente dentro do
-             * update_checksum_with_payload().
-             */
-            meta.tcpLength = hdr.ipv4.totalLen - 16w20;
-
-
-            /********************************************************
-             * REDE PRIVADA -> REDE EXTERNA
-             *
-             * Verifica se origem pertence a:
-             *
-             * 10.0.0.0/24
-             ********************************************************/
-
-            if ((hdr.ipv4.srcAddr & 0xFFFFFF00) ==
-                0x0A000000) {
-
-                nat_out_table.apply();
+            if (hdr.tcp.isValid()) {
+                meta.srcPort   = hdr.tcp.srcPort;
+                meta.dstPort   = hdr.tcp.dstPort;
+                meta.tcpLength = hdr.ipv4.totalLen - 16w20;
+                base = 0;
+            } else {
+                meta.srcPort = hdr.udp.srcPort;
+                meta.dstPort = hdr.udp.dstPort;
+                base = 65536;
             }
 
+            /* ======================= SAÍDA: 10.0.0.0/24 -> fora ======================= */
+            if ((hdr.ipv4.srcAddr & 0xFFFFFF00) == 0x0A000000) {
 
-            /********************************************************
-             * REDE EXTERNA -> NAT
-             *
-             * Pacote destinado a 200.0.0.1
-             ********************************************************/
+                if (!nat_out_static.apply().hit) {
 
+                    // 1ª tentativa: preservar a porta de origem
+                    idx = base + (bit<32>)meta.srcPort;
+                    nat_owner_ip.read(owner, idx);
+                    nat_owner_port.read(owner_prv, idx);
+
+                    if (owner == 0 || (owner == hdr.ipv4.srcAddr && owner_prv == meta.srcPort)) {
+                        newPort = meta.srcPort;
+                    } else {
+                        // Conflito (outro host já usa essa porta pública):
+                        // usa uma porta alternativa determinística.
+                        alt = meta.srcPort ^ 16w0x8000;
+                        idx = base + (bit<32>)alt;
+                        nat_owner_ip.read(owner, idx);
+                        nat_owner_port.read(owner_prv, idx);
+
+                        if (owner == 0 || (owner == hdr.ipv4.srcAddr && owner_prv == meta.srcPort)) {
+                            newPort = alt;
+                        } else {
+                            ok = false;
+                        }
+                    }
+
+                    if (ok) {
+                        // registra/atualiza o mapeamento porta_pública -> (IP, porta) privados
+                        nat_owner_ip.write(idx, hdr.ipv4.srcAddr);
+                        nat_owner_port.write(idx, meta.srcPort);
+
+                        hdr.ipv4.srcAddr = NAT_PUBLIC_IP;
+                        if (hdr.tcp.isValid()) { hdr.tcp.srcPort = newPort; }
+                        if (hdr.udp.isValid()) { hdr.udp.srcPort = newPort; }
+                    }
+                }
+            }
+
+            /* ======================= VOLTA: fora -> 200.0.0.1 ======================= */
             else if (hdr.ipv4.dstAddr == NAT_PUBLIC_IP) {
 
-                nat_in_table.apply();
+                if (!nat_in_static.apply().hit) {
+                    idx = base + (bit<32>)meta.dstPort;
+                    nat_owner_ip.read(owner, idx);
+                    nat_owner_port.read(owner_prv, idx);
+
+                    if (owner == 0) {
+                        ok = false;          // sem mapeamento: descarta
+                    } else {
+                        hdr.ipv4.dstAddr = owner;
+                        if (hdr.tcp.isValid()) { hdr.tcp.dstPort = owner_prv; }
+                        if (hdr.udp.isValid()) { hdr.udp.dstPort = owner_prv; }
+                    }
+                }
             }
 
-
-            /********************************************************
-             * Encaminhamento após NAT
-             ********************************************************/
-
-            ipv4_lpm.apply();
-        }
-
-
-        /************************************************************
-         * UDP
-         ************************************************************/
-
-        else if (hdr.udp.isValid()) {
-
-
-            /*
-             * Guarda as portas originais.
-             */
-            meta.srcPort = hdr.udp.srcPort;
-
-            meta.dstPort = hdr.udp.dstPort;
-
-
-            /********************************************************
-             * REDE PRIVADA -> EXTERNA
-             ********************************************************/
-
-            if ((hdr.ipv4.srcAddr & 0xFFFFFF00) ==
-                0x0A000000) {
-
-                nat_out_table.apply();
+            /* Tráfego externo que não é para o NAT: não encaminha */
+            else {
+                ok = false;
             }
 
-
-            /********************************************************
-             * REDE EXTERNA -> NAT
-             ********************************************************/
-
-            else if (hdr.ipv4.dstAddr == NAT_PUBLIC_IP) {
-
-                nat_in_table.apply();
+            if (ok) {
+                ipv4_lpm.apply();
+            } else {
+                drop();
             }
-
-
-            /********************************************************
-             * Encaminhamento
-             ********************************************************/
-
-            ipv4_lpm.apply();
-        }
-
-
-        /************************************************************
-         * OUTROS PROTOCOLOS
-         *
-         * ICMP, GRE etc.
-         *
-         * O trabalho exige descarte.
-         ************************************************************/
-
-        else {
-
-            drop();
         }
     }
 }
