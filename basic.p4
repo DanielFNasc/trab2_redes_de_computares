@@ -5,6 +5,8 @@
 #include <v1model.p4>
 
 const bit<16> TYPE_IPV4 = 0x800;
+// IP público do NAT = 200.0.0.1
+const bit<32> NAT_PUBLIC_IP = 0xC8000001;
 
 /*************************************************************************
 *********************** H E A D E R S  ***********************************
@@ -103,7 +105,7 @@ parser MyParser(packet_in packet,
         transition select(hdr.ipv4.protocol) {
           6: parse_tcp;
           17: parse_udp;
-          default: reject;
+          default: accept;
         }
     }
     
@@ -171,18 +173,6 @@ control MyIngress(inout headers hdr,
 
     /**********************************************************
      * NAT DE SAÍDA
-     *
-     * Exemplo:
-     *
-     * 10.0.0.1:5000
-     *        ↓
-     * 200.0.0.1:5000
-     *
-     * ou, se houver conflito:
-     *
-     * 10.0.0.2:5000
-     *        ↓
-     * 200.0.0.1:5001
      **********************************************************/
     action nat_out(bit<16> translated_port) {
 
@@ -201,14 +191,6 @@ control MyIngress(inout headers hdr,
 
     /**********************************************************
      * NAT DE RETORNO
-     *
-     * Exemplo:
-     *
-     * 200.0.0.2:9001 -> 200.0.0.1:5000
-     *
-     * vira:
-     *
-     * 200.0.0.2:9001 -> 10.0.0.1:5000
      **********************************************************/
     action nat_in(ip4Addr_t private_ip,
                   bit<16> private_port) {
@@ -311,7 +293,7 @@ control MyIngress(inout headers hdr,
     apply {
 
         /*
-         * O trabalho aceita somente IPv4.
+         * aceita somente IPv4.
          */
 
         if (!hdr.ipv4.isValid()) {
@@ -329,15 +311,6 @@ control MyIngress(inout headers hdr,
             // guarda as portas originais
             meta.srcPort = hdr.tcp.srcPort;
             meta.dstPort = hdr.tcp.dstPort;
-
-
-            /*
-             * Pacote vindo da rede privada.
-             *
-             * 10.0.0.0/24
-             *
-             * Verifica os primeiros 24 bits.
-             */
 
             if ((hdr.ipv4.srcAddr & 0xFFFFFF00) ==
                 0x0A000000) {
