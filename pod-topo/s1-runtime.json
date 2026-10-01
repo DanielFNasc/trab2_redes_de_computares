@@ -105,5 +105,63 @@
         "private_port": 6000
       }
     }
+
+    ,
+{
+  "table": "MyIngress.nat_out_table",
+  "match": {
+    "hdr.ipv4.srcAddr": "10.0.0.1",
+    "hdr.ipv4.dstAddr": "200.0.0.2",
+    "meta.srcPort": 6000,
+    "meta.dstPort": 5000,
+    "hdr.ipv4.protocol": 17
+  },
+  "action_name": "MyIngress.nat_out",
+  "action_params": {
+    "translated_port": 6000
+  }
+},
+{
+  "table": "MyIngress.nat_in_table",
+  "match": {
+    "hdr.ipv4.srcAddr": "200.0.0.2",
+    "meta.srcPort": 5000,
+    "meta.dstPort": 6000,
+    "hdr.ipv4.protocol": 17
+  },
+  "action_name": "MyIngress.nat_in",
+  "action_params": {
+    "private_ip": "10.0.0.1",
+    "private_port": 6000
+  }
+},
+{
+  "table": "MyIngress.nat_out_table",
+  "match": {
+    "hdr.ipv4.srcAddr": "10.0.0.2",
+    "hdr.ipv4.dstAddr": "200.0.0.2",
+    "meta.srcPort": 8000,
+    "meta.dstPort": 80,
+    "hdr.ipv4.protocol": 6
+  },
+  "action_name": "MyIngress.nat_out",
+  "action_params": {
+    "translated_port": 8000
+  }
+},
+{
+  "table": "MyIngress.nat_in_table",
+  "match": {
+    "hdr.ipv4.srcAddr": "200.0.0.2",
+    "meta.srcPort": 80,
+    "meta.dstPort": 8000,
+    "hdr.ipv4.protocol": 6
+  },
+  "action_name": "MyIngress.nat_in",
+  "action_params": {
+    "private_ip": "10.0.0.2",
+    "private_port": 8000
+  }
+}
   ]
 }
