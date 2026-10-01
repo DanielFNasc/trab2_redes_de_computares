@@ -7,8 +7,9 @@
       "table": "MyIngress.ipv4_lpm",
       "default_action": true,
       "action_name": "MyIngress.drop",
-      "action_params": { }
+      "action_params": {}
     },
+
     {
       "table": "MyIngress.ipv4_lpm",
       "match": {
@@ -20,6 +21,7 @@
         "port": 1
       }
     },
+
     {
       "table": "MyIngress.ipv4_lpm",
       "match": {
@@ -31,6 +33,7 @@
         "port": 2
       }
     },
+
     {
       "table": "MyIngress.ipv4_lpm",
       "match": {
@@ -42,15 +45,64 @@
         "port": 3
       }
     },
+
     {
-      "table": "MyIngress.ipv4_lpm",
+      "table": "MyIngress.nat_out_table",
       "match": {
-        "hdr.ipv4.dstAddr": ["10.0.4.4", 32]
+        "hdr.ipv4.srcAddr": "10.0.0.1",
+        "hdr.ipv4.dstAddr": "200.0.0.2",
+        "meta.srcPort": 5000,
+        "meta.dstPort": 9001,
+        "hdr.ipv4.protocol": 17
       },
-      "action_name": "MyIngress.ipv4_forward",
+      "action_name": "MyIngress.nat_out",
       "action_params": {
-        "dstAddr": "08:00:00:00:04:00",
-        "port": 4
+        "translated_port": 5000
+      }
+    },
+
+    {
+      "table": "MyIngress.nat_in_table",
+      "match": {
+        "hdr.ipv4.srcAddr": "200.0.0.2",
+        "meta.srcPort": 9001,
+        "meta.dstPort": 5000,
+        "hdr.ipv4.protocol": 17
+      },
+      "action_name": "MyIngress.nat_in",
+      "action_params": {
+        "private_ip": "10.0.0.1",
+        "private_port": 5000
+      }
+    },
+
+    {
+      "table": "MyIngress.nat_out_table",
+      "match": {
+        "hdr.ipv4.srcAddr": "10.0.0.2",
+        "hdr.ipv4.dstAddr": "200.0.0.2",
+        "meta.srcPort": 6000,
+        "meta.dstPort": 9002,
+        "hdr.ipv4.protocol": 6
+      },
+      "action_name": "MyIngress.nat_out",
+      "action_params": {
+        "translated_port": 6000
+      }
+    },
+
+    {
+      "table": "MyIngress.nat_in_table",
+      "match": {
+        "hdr.ipv4.srcAddr": "200.0.0.2",
+        "meta.srcPort": 9002,
+        "meta.dstPort": 6000,
+        "hdr.ipv4.protocol": 6
+      },
+      "action_name": "MyIngress.nat_in",
+      "action_params": {
+        "private_ip": "10.0.0.2",
+        "private_port": 6000
       }
     }
   ]
