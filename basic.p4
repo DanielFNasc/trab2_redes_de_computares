@@ -59,7 +59,8 @@ header udp_t {
 }
 
 struct metadata {
-    /* empty */
+    bit<16> srcPort;
+    bit<16> dstPort;
 }
 
 struct headers {
@@ -145,64 +146,272 @@ control MyIngress(inout headers hdr,
                   inout metadata meta,
                   inout standard_metadata_t standard_metadata) {
 
+    /**********************************************************
+     * DESCARTA PACOTE
+     **********************************************************/
     action drop() {
         mark_to_drop(standard_metadata);
     }
 
-    /*********************************************************************
-     * NOTE FOR NEW READERS:
-     * 'ipv4_forward(dstAddr, port)' is invoked by table 'ipv4_lpm'.
-     *
-     * The values for 'dstAddr' and 'port' are *action data* supplied by
-     * the control plane when it installs entries in 'ipv4_lpm'.
-     *
-     * They mean:
-     *   - dstAddr  => Ethernet destination MAC for the next hop
-     *   - port     => output port (ultimately written to standard_metadata.egress_spec)
-     *
-     * Example (BMv2 simple_switch_CLI):
-     *   table_add ipv4_lpm ipv4_forward 10.0.1.1/32 => 00:00:00:00:01:00 1
-     * which passes MAC=00:00:00:00:01:00 and PORT=1 as action parameters
-     * into ipv4_forward(dstAddr, port).
-     *********************************************************************/
-    action ipv4_forward(macAddr_t dstAddr, egressSpec_t port) {
-      
-      
+
+    /**********************************************************
+     * ENCAMINHAMENTO IPv4
+     **********************************************************/
+    action ipv4_forward(macAddr_t dstAddr,
+                        egressSpec_t port) {
+
         standard_metadata.egress_spec = port;
+
         hdr.ethernet.srcAddr = hdr.ethernet.dstAddr;
         hdr.ethernet.dstAddr = dstAddr;
+
         hdr.ipv4.ttl = hdr.ipv4.ttl - 1;
-  
-        
     }
 
-    /*********************************************************************
-     * LPM table for IPv4:
-     *   - Matches on hdr.ipv4.dstAddr using longest-prefix match (lpm)
-     *   - On hit, calls ipv4_forward with *action data* populated by the
-     *     control plane when it installs the table entry.
-     *********************************************************************/
-    table ipv4_lpm {
-        key = {
-            hdr.ipv4.dstAddr: lpm;
+
+    /**********************************************************
+     * NAT DE SAÍDA
+     *
+     * Exemplo:
+     *
+     * 10.0.0.1:5000
+     *        ↓
+     * 200.0.0.1:5000
+     *
+     * ou, se houver conflito:
+     *
+     * 10.0.0.2:5000
+     *        ↓
+     * 200.0.0.1:5001
+     **********************************************************/
+    action nat_out(bit<16> translated_port) {
+
+        // troca o endereço privado pelo IP público do NAT
+        hdr.ipv4.srcAddr = NAT_PUBLIC_IP;
+
+        if (hdr.tcp.isValid()) {
+            hdr.tcp.srcPort = translated_port;
         }
+
+        if (hdr.udp.isValid()) {
+            hdr.udp.srcPort = translated_port;
+        }
+    }
+
+
+    /**********************************************************
+     * NAT DE RETORNO
+     *
+     * Exemplo:
+     *
+     * 200.0.0.2:9001 -> 200.0.0.1:5000
+     *
+     * vira:
+     *
+     * 200.0.0.2:9001 -> 10.0.0.1:5000
+     **********************************************************/
+    action nat_in(ip4Addr_t private_ip,
+                  bit<16> private_port) {
+
+        hdr.ipv4.dstAddr = private_ip;
+
+        if (hdr.tcp.isValid()) {
+            hdr.tcp.dstPort = private_port;
+        }
+
+        if (hdr.udp.isValid()) {
+            hdr.udp.dstPort = private_port;
+        }
+    }
+
+
+    /**********************************************************
+     * TABELA NAT DE SAÍDA
+     *
+     * Usa a conexão original para descobrir qual porta pública
+     * deverá ser utilizada.
+     **********************************************************/
+    table nat_out_table {
+
+        key = {
+
+            hdr.ipv4.srcAddr : exact;
+            hdr.ipv4.dstAddr : exact;
+
+            meta.srcPort : exact;
+            meta.dstPort : exact;
+
+            hdr.ipv4.protocol : exact;
+        }
+
+        actions = {
+            nat_out;
+            NoAction;
+        }
+
+        size = 1024;
+
+        default_action = NoAction();
+    }
+
+
+    /**********************************************************
+     * TABELA NAT DE RETORNO
+     *
+     * Usa a porta pública para descobrir para qual host
+     * privado o pacote deverá voltar.
+     **********************************************************/
+    table nat_in_table {
+
+        key = {
+
+            hdr.ipv4.srcAddr : exact;
+
+            meta.srcPort : exact;
+            meta.dstPort : exact;
+
+            hdr.ipv4.protocol : exact;
+        }
+
+        actions = {
+            nat_in;
+            NoAction;
+        }
+
+        size = 1024;
+
+        default_action = NoAction();
+    }
+
+
+    /**********************************************************
+     * TABELA DE ENCAMINHAMENTO IPv4
+     **********************************************************/
+    table ipv4_lpm {
+
+        key = {
+            hdr.ipv4.dstAddr : lpm;
+        }
+
         actions = {
             ipv4_forward;
             drop;
             NoAction;
         }
+
         size = 1024;
+
         default_action = drop();
     }
 
+
+    /**********************************************************
+     * PROCESSAMENTO
+     **********************************************************/
     apply {
-        /* TODO: fix ingress control logic
-         *  - Good practice: apply ipv4_lpm only when the IPv4 header is valid, e.g.:
-         *      if (hdr.ipv4.isValid()) { ipv4_lpm.apply(); }
-         *    This skeleton currently applies unconditionally for the exercise.
+
+        /*
+         * O trabalho aceita somente IPv4.
          */
-        if (hdr.ipv4.isValid()) {
+
+        if (!hdr.ipv4.isValid()) {
+
+            drop();
+
+        }
+
+        /*
+         * TCP
+         */
+
+        else if (hdr.tcp.isValid()) {
+
+            // guarda as portas originais
+            meta.srcPort = hdr.tcp.srcPort;
+            meta.dstPort = hdr.tcp.dstPort;
+
+
+            /*
+             * Pacote vindo da rede privada.
+             *
+             * 10.0.0.0/24
+             *
+             * Verifica os primeiros 24 bits.
+             */
+
+            if ((hdr.ipv4.srcAddr & 0xFFFFFF00) ==
+                0x0A000000) {
+
+                nat_out_table.apply();
+
+            }
+
+            /*
+             * Pacote vindo da rede pública para o IP do NAT.
+             */
+
+            else if (hdr.ipv4.dstAddr == NAT_PUBLIC_IP) {
+
+                nat_in_table.apply();
+
+            }
+
+
+            /*
+             * Depois do NAT, faz o encaminhamento.
+             */
+
             ipv4_lpm.apply();
+        }
+
+        /*
+         * UDP
+         */
+
+        else if (hdr.udp.isValid()) {
+
+            // guarda as portas originais
+            meta.srcPort = hdr.udp.srcPort;
+            meta.dstPort = hdr.udp.dstPort;
+
+
+            /*
+             * Rede privada -> pública
+             */
+
+            if ((hdr.ipv4.srcAddr & 0xFFFFFF00) ==
+                0x0A000000) {
+
+                nat_out_table.apply();
+
+            }
+
+            /*
+             * Rede pública -> NAT
+             */
+
+            else if (hdr.ipv4.dstAddr == NAT_PUBLIC_IP) {
+
+                nat_in_table.apply();
+
+            }
+
+
+            ipv4_lpm.apply();
+        }
+
+        /*
+         * Qualquer outro protocolo:
+         *
+         * ICMP
+         * GRE
+         * etc.
+         */
+
+        else {
+
+            drop();
+
         }
     }
 }
