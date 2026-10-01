@@ -107,13 +107,13 @@ parser MyParser(packet_in packet,
     }
     
     state parse_tcp {
-    packet.extract(hdr.tcp);
-    transition accept;
+      packet.extract(hdr.tcp);
+      transition accept;
     }
 
     state parse_udp {
-    packet.extract(hdr.udp);
-    transition accept;
+      packet.extract(hdr.udp);
+      transition accept;
     }
 
         /* TODO: add parser logic
@@ -255,6 +255,10 @@ control MyDeparser(packet_out packet, in headers hdr) {
           packet.emit(hdr.ethernet);
           packet.emit(hdr.ipv4);   // per P4_16 spec, emit appends a header
                                      // only if it is valid; no 'if' needed.
+
+       
+          packet.emit(hdr.tcp);
+        
         
     }
 }
