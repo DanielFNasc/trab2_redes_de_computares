@@ -257,7 +257,8 @@ control MyDeparser(packet_out packet, in headers hdr) {
                                      // only if it is valid; no 'if' needed.
 
        
-          packet.emit(hdr.tcp);
+         packet.emit(hdr.tcp);
+         packet.emit(hdr.udp);
         
         
     }
