@@ -284,6 +284,11 @@ control MyIngress(
         }
     }
 
+    action nat_out_preserve() {
+        // Traduz somente o IP de origem.
+        // A porta de origem permanece inalterada.
+        hdr.ipv4.srcAddr = NAT_PUBLIC_IP;
+    }
 
     /****************************************************************
      * NAT DE RETORNO
@@ -331,6 +336,13 @@ control MyIngress(
         }
     }
 
+    action nat_in_preserve(
+        ip4Addr_t private_ip
+    ) {
+        // Traduz somente o IP de destino.
+        // A porta de destino permanece inalterada.
+        hdr.ipv4.dstAddr = private_ip;
+    }
 
     /****************************************************************
      * TABELA NAT DE SAÍDA
