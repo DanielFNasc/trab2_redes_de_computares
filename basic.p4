@@ -38,6 +38,26 @@ header ipv4_t {
     ip4Addr_t dstAddr;
 }
 
+header tcp_t {
+    bit<16> srcPort;
+    bit<16> dstPort;
+    bit<32> seqNo;
+    bit<32> ackNo;
+    bit<4>  dataOffset;
+    bit<4>  reserved;
+    bit<8>  flags;
+    bit<16> window;
+    bit<16> checksum;
+    bit<16> urgentPtr;
+}
+
+header udp_t {
+    bit<16> srcPort;
+    bit<16> dstPort;
+    bit<16> length;
+    bit<16> checksum;
+}
+
 struct metadata {
     /* empty */
 }
@@ -45,6 +65,8 @@ struct metadata {
 struct headers {
     ethernet_t   ethernet;
     ipv4_t       ipv4;
+    tcp_t         tcp;
+    udp_t          udp;
 }
 
 /*************************************************************************
@@ -77,7 +99,21 @@ parser MyParser(packet_in packet,
 
     state parse_ipv4 {
         packet.extract(hdr.ipv4);
-        transition accept;
+        transition select(hdr.ipv4.protocol) {
+          6: parse_tcp;
+          17: parse_udp;
+          default: reject;
+        }
+    }
+    
+    state parse_tcp {
+    packet.extract(hdr.tcp);
+    transition accept;
+    }
+
+    state parse_udp {
+    packet.extract(hdr.udp);
+    transition accept;
     }
 
         /* TODO: add parser logic
