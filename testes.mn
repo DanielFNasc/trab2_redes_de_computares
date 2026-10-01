@@ -1,0 +1,12 @@
+h3 pkill -f server_NAT.py
+h3 python3 server_NAT.py > /tmp/nat_server.txt 2>&1 &
+h3 sleep 2
+h1 python3 client_NAT.py h1 > /tmp/nat_h1.txt 2>&1
+h2 python3 client_NAT.py h2 > /tmp/nat_h2.txt 2>&1
+h1 python3 client_NAT.py h1 --collision > /tmp/nat_col_h1.txt 2>&1 &
+h2 python3 client_NAT.py h2 --collision > /tmp/nat_col_h2.txt 2>&1
+h1 sleep 1
+h1 python3 client_NAT.py h1 --bonus > /tmp/nat_bonus_h1.txt 2>&1
+h2 python3 client_NAT.py h2 --bonus > /tmp/nat_bonus_h2.txt 2>&1
+h1 python3 client_NAT.py report
+h3 pkill -f server_NAT.py
