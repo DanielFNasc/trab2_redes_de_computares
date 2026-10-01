@@ -514,18 +514,15 @@ control MyComputeChecksum(inout headers hdr,
 * The deparser serializes headers back onto the packet in order.         *
 *************************************************************************/
 
-control MyDeparser(packet_out packet, in headers hdr) {
-    apply {
-        
-          packet.emit(hdr.ethernet);
-          packet.emit(hdr.ipv4);   // per P4_16 spec, emit appends a header
-                                     // only if it is valid; no 'if' needed.
+control MyDeparser(packet_out packet,
+                   in headers hdr) {
 
-       
-         packet.emit(hdr.tcp);
-         packet.emit(hdr.udp);
-        
-        
+    apply {
+
+        packet.emit(hdr.ethernet);
+        packet.emit(hdr.ipv4);
+        packet.emit(hdr.tcp);
+        packet.emit(hdr.udp);
     }
 }
 
