@@ -284,15 +284,6 @@ control MyIngress(
         }
     }
 
-    action nat_out_preserve() {
-
-        /*
-         * Troca o IP privado pelo IP público do NAT e mantém
-         * a porta original.
-         */
-        hdr.ipv4.srcAddr = NAT_PUBLIC_IP;
-    }
-
 
     /****************************************************************
      * NAT DE RETORNO
@@ -340,15 +331,6 @@ control MyIngress(
         }
     }
 
-    action nat_in_preserve(ip4Addr_t private_ip) {
-
-        /*
-         * Restaura IP privado de destino e mantém
-         * a porta de destino original.
-         */
-        hdr.ipv4.dstAddr = private_ip;
-    }
-
 
     /****************************************************************
      * TABELA NAT DE SAÍDA
@@ -370,9 +352,9 @@ control MyIngress(
 
             hdr.ipv4.dstAddr : exact;
 
-            meta.srcPort : range;
+            meta.srcPort : exact;
 
-            meta.dstPort : range;
+            meta.dstPort : exact;
 
             hdr.ipv4.protocol : exact;
         }
@@ -381,7 +363,6 @@ control MyIngress(
         actions = {
 
             nat_out;
-            nat_out_preserve;
 
             NoAction;
         }
@@ -405,9 +386,9 @@ control MyIngress(
 
             hdr.ipv4.srcAddr : exact;
 
-            meta.srcPort : range;
+            meta.srcPort : exact;
 
-            meta.dstPort : range;
+            meta.dstPort : exact;
 
             hdr.ipv4.protocol : exact;
         }
@@ -416,7 +397,6 @@ control MyIngress(
         actions = {
 
             nat_in;
-            nat_in_preserve;
 
             NoAction;
         }
