@@ -34,7 +34,7 @@
     {
       "table": "MyIngress.ipv4_lpm",
       "match": {
-        "hdr.ipv4.dstAddr": ["200.0.0.3", 32]
+        "hdr.ipv4.dstAddr": ["200.0.0.2", 32]
       },
       "action_name": "MyIngress.ipv4_forward",
       "action_params": {
